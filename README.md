@@ -24,4 +24,4 @@ CLUSTER_CRT_NAME: What your cluster's cert is named
 FLOCKER_CONTROL_HOST: Duh. This gets written into the generated agent.yml
 FLOCKER_DATASET_BACKEND: defaults to aws, only supports that now.
 AWS_ACCESS_KEY_ID: so you can make mounts
-AWS_SECRET_ACCESS_KEY: you need this too. 
+AWS_SECRET_ACCESS_KEY: you need this too.
