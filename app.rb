@@ -4,45 +4,29 @@ require 'rubygems/package'
 require 'tmpdir'
 require 'securerandom'
 require 'yaml'
-
+require_relative "lib/creds.rb"
+require_relative "lib/hash.rb"
 
 AUTH_TOKEN = SecureRandom.urlsafe_base64(40)
 FLOCKER_KEY_DIR = ENV['FLOCKER_KEY_DIR'] || '/etc/flocker'
-CLUSTER_CRT_NAME = ENV['FLOCKER_CLUSTER_CRT_NAME'] || "cluster.crt"
+FLOCKER_CLUSTER_NAME = ENV['FLOCKER_CLUSTER_NAME'] || "cluster"
 FLOCKER_CONTROL_HOST = ENV['FLOCKER_CONTROL_HOST'] || IO.popen('hostname -f').read.strip
-FLOCKER_DATASET_BACKEND = ENV['FLOCKER_DATASET_BACKEND'] || "aws"
-AWS_ACCESS_KEY_ID = ENV['AWS_ACCESS_KEY_ID'] || ""
-AWS_SECRET_ACCESS_KEY = ENV['AWS_SECRET_ACCESS_KEY'] || ""
+FLOCKER_GENERATE_VAULT = ENV['FLOCKER_GENERATE_VAULT'] || "false"
 
-def generate_credentials
-  creds = {}
-  Dir.mktmpdir do |dir|
-    system("flocker-ca create-node-certificate -i #{FLOCKER_KEY_DIR} -o #{dir}")
-    cert = File.open(Dir.glob("#{dir}/*.crt")[0]).read
-    key = File.open(Dir.glob("#{dir}/*.key")[0]).read
-    cluster_key = File.open(File.join(FLOCKER_KEY_DIR, CLUSTER_CRT_NAME)).read
-    creds.merge!({cert: cert, key: key, cluster_key: cluster_key})
-  end
-  creds
+if FLOCKER_GENERATE_VAULT == "true"
+  FileUtils.mkdir_p(FLOCKER_KEY_DIR)
+  system("cd #{FLOCKER_KEY_DIR} && flocker-ca initialize #{FLOCKER_CLUSTER_NAME}")
+  system("flocker-ca create-control-certificate -i #{FLOCKER_KEY_DIR} -o #{FLOCKER_KEY_DIR} #{FLOCKER_CONTROL_HOST}")
+  control_cert= Dir.glob(File.join(FLOCKER_KEY_DIR, "control*.crt")).first
+  control_key= Dir.glob(File.join(FLOCKER_KEY_DIR, "control*.key")).first
+  FileUtils.mv(control_cert, "#{FLOCKER_KEY_DIR}/control.crt")
+  FileUtils.mv(control_key, "#{FLOCKER_KEY_DIR}/control.key")
+  FlockerCert.new.write_node_credentials
 end
 
-def agent_config(az)
-  {"version" => 1,
-   "control-service" => {
-      "hostname" => FLOCKER_CONTROL_HOST, "port" => 4524
-    },
-   "dataset" => {
-     "backend" => "aws",
-     "region" => az[0..-2],
-     "zone" => az,
-     "access_key_id" => AWS_ACCESS_KEY_ID,
-     "secret_access_key" => AWS_SECRET_ACCESS_KEY
-   }
-  }.to_yaml
-end
-
-def create_tokenfile(az)
-  creds = generate_credentials
+def create_tokenfile(opts)
+  cert_obj = FlockerCert.new(opts)
+  creds =  cert_obj.node_credentials
   tarfile = StringIO.new
   Gem::Package::TarWriter.new(tarfile) do |tar|
     cert = creds[:cert]
@@ -57,7 +41,7 @@ def create_tokenfile(az)
     tar.add_file_simple("cluster.crt", 0600, creds[:cluster_key].length) do |io|
       io.write(creds[:cluster_key])
     end
-    agent_config_file = agent_config(az)
+    agent_config_file = cert_obj.agent_config
     tar.add_file_simple("agent.yml", 0600, agent_config_file.length) do |io|
       io.write(agent_config_file)
     end
@@ -66,16 +50,26 @@ def create_tokenfile(az)
   tarfile
 end
 
-get '/token.tar' do
-  if params.has_key?('AUTH_TOKEN') && params.has_key?('AZ')
+post '/credentials.tar' do
+  if params.has_key?('AUTH_TOKEN') && params.has_key?('region') && params.has_key?('zone') 
     if params['AUTH_TOKEN'] == AUTH_TOKEN
       response.headers['content_type'] = "application/octet-stream"
-      attachment("token.tar")
-      response.write(create_tokenfile(params['AZ']))
+      attachment("credentials.tar")
+      response.write(create_tokenfile({"region" => params['region'], "zone" => params['zone']}))
     else
       halt 401, "Go away"
     end
   else
     halt 401, "Go away"
+  end
+end
+
+post "/agent.yml" do
+  if params.has_key?('AUTH_TOKEN') && params.has_key?('region') && params.has_key?('zone') 
+    if params['AUTH_TOKEN'] == AUTH_TOKEN
+    FlockerCert.new({"region" => params['region'], "zone" => params['zone']}).agent_config.to_s
+    end
+  else
+    halt 401, "go away"
   end
 end
