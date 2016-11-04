@@ -21,6 +21,7 @@ if FLOCKER_GENERATE_VAULT == "true"
   control_key= Dir.glob(File.join(FLOCKER_KEY_DIR, "control*.key")).first
   FileUtils.mv(control_cert, "#{FLOCKER_KEY_DIR}/control.crt")
   FileUtils.mv(control_key, "#{FLOCKER_KEY_DIR}/control.key")
+  system("flocker-ca create-api-certificate -i #{FLOCKER_KEY_DIR} -o #{FLOCKER_KEY_DIR} plugin")
   FlockerCert.new.write_node_credentials
 end
 
@@ -44,6 +45,14 @@ def create_tokenfile(opts)
     agent_config_file = cert_obj.agent_config
     tar.add_file_simple("agent.yml", 0600, agent_config_file.length) do |io|
       io.write(agent_config_file)
+    end
+    plugin_cert = cert_obj.plugin_credentials[:cert]
+    tar.add_file_simple("plugin.crt", 0600, plugin_cert.length) do |io|
+      io.write(plugin_cert)
+    end
+    plugin_key = cert_obj.plugin_credentials[:key]
+    tar.add_file_simple("plugin.key", 0600, plugin_key.length) do |io|
+      io.write(plugin_key)
     end
   end
   tarfile.seek(0)

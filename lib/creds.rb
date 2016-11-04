@@ -23,6 +23,13 @@ class FlockerCert
     creds
   end
 
+  def plugin_credentials
+    creds = {
+      cert: File.open("#{FLOCKER_KEY_DIR}/plugin.crt").read, 
+      key: File.open("#{FLOCKER_KEY_DIR}/plugin.key").read
+    }
+  end
+
   def write_node_credentials
     creds = node_credentials
     File.open("#{FLOCKER_KEY_DIR}/node.crt", "w") do |file|
